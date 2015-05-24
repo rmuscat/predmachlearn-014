@@ -1,0 +1,96 @@
+---
+title: "Practical Machine Learning"
+author: "RM"
+date: "Saturday, May 23, 2015"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Introduction
+
+The goal of this project is to anaylise and build a machine learning model that uses motion data from accelerometers on a belt, forearm, arm, and dumbell of 6 participants to predict whether barbell lifts have been done correctly. The data is available from,
+
+* Training Set: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+* Test Set: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The original data set was kindly provided by Groupware@LES and can be see by following this link, 
+
+* http://groupware.les.inf.puc-rio.br/har.
+
+# Loading and Cleaning Data
+We load the data, replace "NA" and "" with actual NAs. We will also clean up columns we won't need or which could generate unwanted bias. Example, we don't want the user name to be a factor in the model, a user who has just bad form with dumbbells would potentially become a weighted variable and cause a fit on the name rather than his actual movements.
+
+```{r warning=FALSE}
+training <- read.csv("./pml-training.csv",na.strings=c("","NA"),strip.white=FALSE,stringsAsFactors=FALSE)
+training[ training == "#DIV/0!"] = NA
+dim(training)
+training <- cbind(training$classe,subset(training, select = -c(classe,X,user_name,raw_timestamp_part_1,raw_timestamp_part_2,cvtd_timestamp,new_window,num_window)))
+colnames(training)[1] <- "classe"
+dim(training)
+
+training$classe <- as.factor(training$classe)
+for(i in c(2:ncol(training))) {
+    training[,i] <- as.numeric(training[,i])
+}
+training[ is.na(training) ] <- 0
+
+# Confirm we have the categorisation field
+head(training$classe)
+```
+
+# Partitioning the training set (cross-validation)
+We will now partition the training set for analysis and testing,
+```{r warning=FALSE}
+library(caret)
+inTrain <- createDataPartition(y=training$classe,p=0.7,list=FALSE)
+trainingFinal <- training[inTrain,]
+dim(trainingFinal)
+
+testFinal <- training[-inTrain,]
+dim(testFinal)
+```
+
+Now we are good to go.
+
+# How to train your Model
+```{r cache=TRUE, warning=FALSE}
+require(randomForest)
+set.seed(666)
+system.time(modelFitRF <- randomForest(classe ~ .,data=trainingFinal,importance=TRUE))
+```
+
+# Testing our predictions
+The estimated error rate of our model is < 0.6%.
+```{r  warning=FALSE}
+modelFitRF
+```
+
+Finally we can run our model against our test set to calculate the success, 
+```{r  warning=FALSE}
+require(randomForest)
+pred <- predict(modelFitRF,testFinal)
+testFinal$predRight <- pred==testFinal$classe
+table(pred,testFinal$classe)
+```
+Our failure rate on the test set is less than 0.7%,
+```{r  warning=FALSE}
+library(plyr)
+count(testFinal,"predRight") # True (Correct) vs False (Incorrect) Predictions  
+100 * count(testFinal,"predRight")[,2][1] / nrow(testFinal)  # Incorrect as a % of total
+```
+
+And these are the most important variables (> 20% importance - filtered to reduce graph noise),
+```{r  warning=FALSE}
+vi <- varImp(modelFitRF)
+vi$avgImp <- rowMeans(vi)
+qplot(x=rownames(vi[vi$avgImp > 20.0,]),y=vi[vi$avgImp > 20.0,5]) + theme(axis.text.x = element_text(angle = 90, hjust = 0)) + xlab("Variable") + ylab("Importance (%)")
+```
+
+# Conclusions
+
+* Expected error rate of < 0.6%
+* Failure rate on our test set was just under 0.7%
+* Two most important variables are,
+ + roll_belt
+ + pitch_belt
